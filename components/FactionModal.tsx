@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+
+import React, { useMemo, useState } from 'react';
 import { Faction, PlayerStats } from '../types';
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
   themeColor: string;
   slogan?: string;
   symbol?: string;
+  designatedSuccessor?: string | null;
 }
 
 const safeString = (val: any, fallback = ""): string => {
@@ -35,20 +37,24 @@ export const FactionModal: React.FC<Props> = ({
   supremeLeader,
   themeColor,
   slogan,
-  symbol
+  symbol,
+  designatedSuccessor
 }) => {
-  if (!isOpen) return null;
+  // State for mobile view profile collapsing
+  const [isProfileCollapsed, setIsProfileCollapsed] = useState(false);
 
   const safeFactions = useMemo(() => {
     if (!Array.isArray(factions)) return [];
     return factions.map(f => ({
       name: safeString(f?.name, "未知组织"),
       percentage: Number(f?.percentage) || 0,
-      leaders: Array.isArray(f?.leaders) ? f.leaders.map(l => safeString(l)) : [safeString(f?.leaders)],
+      leaders: Array.isArray(f?.leaders) ? f.leaders.map(l => safeString(l)) : (f?.leaders ? [safeString(f?.leaders)] : []),
       color: safeString(f?.color, "#333"),
       description: safeString(f?.description, "")
     })).sort((a, b) => b.percentage - a.percentage);
   }, [factions]);
+
+  if (!isOpen) return null;
 
   const currentLeader = safeString(supremeLeader, "毛泽东");
   const myFaction = safeString(playerStats.currentFaction, "逍遥派");
@@ -75,7 +81,7 @@ export const FactionModal: React.FC<Props> = ({
         </button>
 
         {/* Left Panel: The Situation */}
-        <div className="w-full md:w-2/3 flex-1 md:flex-auto flex flex-col border-b md:border-b-0 md:border-r-2 border-red-900/30 bg-[#f4f1de] min-h-0">
+        <div className="w-full md:w-2/3 flex-1 md:flex-auto flex flex-col border-b md:border-b-0 md:border-r-2 border-red-900/30 bg-[#f4f1de] min-h-0 relative z-10">
             <div className="p-4 md:p-8 flex-shrink-0 text-center border-b-2" style={{ borderColor: themeColor }}>
                 <h2 className="text-2xl md:text-4xl font-black font-serif tracking-widest mb-1 md:mb-2" style={{ color: themeColor }}>革命形势图</h2>
                 <div className="flex items-center justify-center gap-2 text-xs md:text-sm font-bold text-red-800/80">
@@ -99,12 +105,18 @@ export const FactionModal: React.FC<Props> = ({
                     {safeFactions.map((f, idx) => (
                         <div key={idx} className="relative pt-1">
                             <div className="flex justify-between items-end mb-1">
-                                <div className="flex items-baseline gap-2 max-w-[80%]">
+                                <div className="flex flex-col items-start gap-1 max-w-[80%]">
                                     <span className="font-bold text-gray-900 text-base md:text-lg leading-none truncate">{f.name}</span>
-                                    {f.leaders.length > 0 && (
-                                        <span className="text-[10px] md:text-xs text-gray-500 truncate hidden sm:inline">
-                                            (代表: {f.leaders.join('、')})
-                                        </span>
+                                    {/* Leader Badge - Only Show if leaders exist */}
+                                    {f.leaders.length > 0 && f.name !== "逍遥派" && (
+                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                            <span className="text-[9px] bg-gray-200 text-gray-600 px-1 py-0.5 rounded border border-gray-300 font-bold">领袖</span>
+                                            {f.leaders.map((leader, lIdx) => (
+                                                <span key={lIdx} className="text-[10px] bg-white text-gray-800 px-1.5 py-0.5 rounded border border-gray-300 shadow-sm font-serif">
+                                                    {leader}
+                                                </span>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
                                 <span className="font-black font-mono text-red-900">{f.percentage}%</span>
@@ -125,15 +137,26 @@ export const FactionModal: React.FC<Props> = ({
         </div>
 
         {/* Right Panel: Player Actions - Dynamic Flex Layout */}
-        <div className="w-full md:w-1/3 h-auto md:h-full text-[#fdfbf7] flex flex-col relative overflow-hidden shrink-0" style={{ backgroundColor: themeColor }}>
+        <div 
+            className={`w-full md:w-1/3 text-[#fdfbf7] flex flex-col relative overflow-hidden shrink-0 transition-all duration-300 ${isProfileCollapsed ? 'h-[60px] md:h-full' : 'h-auto min-h-[40vh] md:h-full'}`}
+            style={{ backgroundColor: themeColor }}
+        >
             {/* Texture Overlay */}
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10 pointer-events-none"></div>
             
             <div className="relative z-10 flex flex-col h-full p-4 md:p-8 overflow-y-auto custom-scrollbar">
                 
+                {/* Mobile Toggle Handle */}
+                <div className="md:hidden absolute top-0 left-0 right-0 h-8 flex items-center justify-center cursor-pointer" onClick={() => setIsProfileCollapsed(!isProfileCollapsed)}>
+                     <div className="w-12 h-1 bg-white/30 rounded-full"></div>
+                </div>
+
                 {/* Profile Section */}
-                <div className="flex-shrink-0 mb-4 md:mb-6">
-                    <h3 className="text-lg md:text-xl font-bold text-yellow-500 mb-4 border-b border-yellow-500/30 pb-2">我的政治档案</h3>
+                <div className={`flex-shrink-0 mb-4 md:mb-6 ${isProfileCollapsed ? 'opacity-0 md:opacity-100 pointer-events-none md:pointer-events-auto' : 'opacity-100'}`}>
+                    <div className="flex justify-between items-center mb-4 border-b border-yellow-500/30 pb-2 mt-4 md:mt-0">
+                         <h3 className="text-lg md:text-xl font-bold text-yellow-500">我的政治档案</h3>
+                         <button className="md:hidden text-white/50 text-sm" onClick={() => setIsProfileCollapsed(true)}>{isProfileCollapsed ? '展开' : '收起'}</button>
+                    </div>
                     
                     <div className="space-y-4 md:space-y-6">
                         <div>
@@ -141,6 +164,14 @@ export const FactionModal: React.FC<Props> = ({
                             <div className="text-xl md:text-2xl font-black text-white font-serif">{myFaction}</div>
                             {isLeader && <div className="inline-block bg-yellow-600 text-red-900 text-xs font-black px-2 py-0.5 rounded mt-1">派系领袖</div>}
                         </div>
+
+                        {/* Designated Heir - NEW */}
+                        {designatedSuccessor && (
+                             <div className="bg-yellow-900/30 border border-yellow-500/50 p-2 md:p-3 rounded">
+                                 <div className="text-[10px] md:text-xs text-yellow-300 mb-1 font-bold">法定接班人 (遗嘱已立)</div>
+                                 <div className="text-lg md:text-xl font-black text-white font-serif tracking-wide">{designatedSuccessor}</div>
+                             </div>
+                        )}
 
                         <div className="grid grid-cols-2 gap-3 md:gap-4">
                             <div className="bg-black/20 p-2 md:p-3 rounded border border-white/20">
@@ -158,7 +189,7 @@ export const FactionModal: React.FC<Props> = ({
                 <div className="flex-1 min-h-[10px]"></div>
 
                 {/* Actions Section */}
-                <div className="flex-shrink-0 space-y-3 md:space-y-4 pt-3 md:pt-4 mt-2 md:mt-4 border-t border-white/20 pb-4 md:pb-0">
+                <div className={`flex-shrink-0 space-y-3 md:space-y-4 pt-3 md:pt-4 mt-2 md:mt-4 border-t border-white/20 pb-4 md:pb-0 ${isProfileCollapsed ? 'opacity-0 md:opacity-100' : 'opacity-100'}`}>
                     <p className="text-xs text-red-200 italic text-center mb-1">“与天斗，与地斗，与人斗，其乐无穷。”</p>
                     
                     <button

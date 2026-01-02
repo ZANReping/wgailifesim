@@ -61,11 +61,23 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initia
   };
 
   const handleSave = () => {
+    let finalGemini = { ...geminiConfig };
+    let finalOpenAI = { ...openaiConfig };
+    let finalGameSettings = { ...gameSettings };
+
+    // CHEAT MODE CHECK: Check the dedicated cheat code input
+    const code = finalGameSettings.cheatCodeInput ? finalGameSettings.cheatCodeInput.trim().toUpperCase() : '';
+    if (code === 'ZAN') {
+        finalGameSettings.cheatMode = true;
+    } else {
+        finalGameSettings.cheatMode = false;
+    }
+
     onSave({
       apiType,
-      gemini: geminiConfig,
-      openai: openaiConfig,
-      gameSettings
+      gemini: finalGemini,
+      openai: finalOpenAI,
+      gameSettings: finalGameSettings
     });
     onClose();
   };
@@ -314,6 +326,18 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, onSave, initia
                         </label>
                     ))}
                  </div>
+               </div>
+
+               <div>
+                 <label className="block text-sm font-bold text-gray-700 mb-2">神秘代码 (作弊模式)</label>
+                 <input 
+                   type="text" 
+                   value={gameSettings.cheatCodeInput || ''}
+                   onChange={(e) => setGameSettings(prev => ({ ...prev, cheatCodeInput: e.target.value }))}
+                   placeholder="输入代码开启隐藏功能..."
+                   className="w-full bg-[#f4f1de] border-b-2 border-gray-400 focus:border-red-800 outline-none py-1 px-2 transition-colors rounded-none font-mono"
+                 />
+                 <p className="text-xs text-gray-400 mt-1">仅用于测试或特殊体验。</p>
                </div>
             </div>
           )}

@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import CharacterCreation from './components/CharacterCreation';
 import GameUI from './components/GameUI';
 import { SettingsModal } from './components/SettingsModal';
 import { FactionModal } from './components/FactionModal';
-import { startGame, makeTurn, updateGeminiConfig, generateInitialTraits } from './services/geminiService';
+import { startGame, makeTurn, updateGeminiConfig, generateInitialTraits, repairSaveData } from './services/geminiService';
 import { GameState, BackgroundType, PlayerStats, Choice, Attributes, RollResult, Trait, AppSettings, HistoryEntry, TraitChangeLog, ProviderConfig, GameSettings, HistoryStyle, PotentialSuccessor } from './types';
 
 // Initial dynamic stats based on background
@@ -57,6 +58,16 @@ const BASE_DYNAMIC_STATS: Record<BackgroundType, Omit<PlayerStats, 'attributes' 
     currentFaction: "未知",
     isLeader: false,
     inventory: ['历史档案']
+  },
+  [BackgroundType.TIME_TRAVELER]: {
+    politicalStanding: 50,
+    health: 85,
+    mental: 90,
+    redStars: 3,
+    powerPoints: 0,
+    currentFaction: "未知",
+    isLeader: false,
+    inventory: ['未来信物']
   }
 };
 
@@ -163,6 +174,7 @@ const App: React.FC = () => {
   };
 
   const handleStartGame = async (name: string, background: BackgroundType, attributes: Attributes, backstory: string, traits: Trait[], birthYear: number, foreignInfo?: { faction: string }) => {
+    setGameState(null); // Clear previous state immediately to hide Game Over screens
     setIsLoading(true);
     setIsError(false);
     // Include foreignInfo in initialConfig so restarts preserve the correct Foreign Leader status
@@ -212,6 +224,11 @@ const App: React.FC = () => {
           }
       }
 
+      // Cheat Mode Logic
+      if (appSettings.gameSettings.cheatMode) {
+          initialStats.redStars = 99;
+      }
+
       const initialState: GameState = {
         name,
         background,
@@ -224,7 +241,10 @@ const App: React.FC = () => {
         rulingPartySymbol: response.supremeLeaderUpdate?.symbol || "☭",
         historySummary: [],
         isGameOver: false,
-        backstory
+        backstory,
+        turnsSinceLastCritical: 0,
+        designatedSuccessor: null,
+        lastPowerPointGrantDate: undefined
       };
 
       setGameState(initialState);
@@ -240,6 +260,7 @@ const App: React.FC = () => {
 
   const handleInheritGame = async (successor: PotentialSuccessor) => {
       if (!gameState) return;
+      setGameState(null); // Clear state for visual feedback
       setIsLoading(true);
       setIsError(false);
 
@@ -270,8 +291,10 @@ const App: React.FC = () => {
       };
       
       // 3. New Config
-      // Birth year assumption: Successor is around 30-40 years old? Let's say 40 for stability.
-      const newBirthYear = gameState.year - 40;
+      // Birth year assumption: Create a reasonable age (e.g. 20-30) for the successor relative to current year.
+      // Fix: Previously hardcoded to 40 years old (year - 40). Now randomize between 20-35 years old.
+      const heirAge = Math.floor(Math.random() * (35 - 20 + 1)) + 20;
+      const newBirthYear = gameState.year - heirAge;
       
       const newConfig: InitialConfig = {
           name: successor.name,
@@ -303,7 +326,7 @@ const App: React.FC = () => {
 
           const initialStats: PlayerStats = {
             ...BASE_DYNAMIC_STATS[newConfig.background],
-            birthYear: newBirthYear,
+            birthYear: newBirthYear, // Correctly set the calculated birth year
             attributes: defaultAttributes,
             traits: newTraits,
             powerPoints: isSupremeLeader ? 3 : 0, // Reset power points unless supreme leader
@@ -319,6 +342,11 @@ const App: React.FC = () => {
                initialStats.isLeader = true;
           }
 
+          // Cheat Mode Logic
+          if (appSettings.gameSettings.cheatMode) {
+            initialStats.redStars = 99;
+          }
+
           const newState: GameState = {
             name: successor.name,
             background: successor.background,
@@ -331,7 +359,9 @@ const App: React.FC = () => {
             rulingPartySymbol: response.supremeLeaderUpdate?.symbol || gameState.rulingPartySymbol,
             historySummary: gameState.historySummary, // Inherit History
             isGameOver: false,
-            backstory: successor.description
+            backstory: successor.description,
+            turnsSinceLastCritical: 0,
+            designatedSuccessor: null
           };
           
           setGameState(newState);
@@ -378,7 +408,8 @@ const App: React.FC = () => {
         date: { year: gameState.year, month: gameState.month },
         earnedStar: earnStar,
         consumedRedStars: consumedRedStars,
-        consumedPowerPoints: consumedPowerPoints 
+        consumedPowerPoints: consumedPowerPoints,
+        choiceId: choiceId // Pass ID to detect pity usage
       };
 
       updateGameStateFromResponse(response, gameState, actionContext);
@@ -393,6 +424,27 @@ const App: React.FC = () => {
 
   // Helper check for Supreme Leader (By Name Match)
   const isSupremeLeader = gameState && (gameState.name === gameState.supremeLeader);
+
+  // Determine manipulation modal title/type
+  const getManipulateType = (): 'SUPREME' | 'FOREIGN' | 'POWER' => {
+      if (isSupremeLeader) return 'SUPREME';
+      if (!gameState) return 'POWER';
+
+      // Check for Foreign status
+      const isHistorical = gameState.background === BackgroundType.HISTORICAL;
+      const currentFaction = gameState.stats.currentFaction;
+      
+      // Known domestic factions (standard set)
+      const domesticFactions = ['造反派', '保皇派', '保守派', '逍遥派', '无', '红卫兵', '林彪集团', '四人帮'];
+      const isDomestic = domesticFactions.some(df => currentFaction.includes(df));
+
+      if (isHistorical && !isDomestic) {
+          return 'FOREIGN';
+      }
+      return 'POWER';
+  };
+
+  const manipulateType = getManipulateType();
 
   // Calculate Theme Color based on Supreme Leader's original faction
   const themeColor = useMemo(() => {
@@ -424,6 +476,23 @@ const App: React.FC = () => {
 
   const handleExchangeRedStars = () => {
     if (!gameState) return;
+    
+    // Cheat Mode check
+    if (appSettings.gameSettings.cheatMode) {
+        setGameState(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                stats: {
+                    ...prev.stats,
+                    redStars: 99, // Ensure it stays 99
+                    powerPoints: prev.stats.powerPoints + 1
+                }
+            };
+        });
+        return;
+    }
+
     // Cost is 2 if Supreme Leader, 3 otherwise
     const cost = isSupremeLeader ? 2 : 3;
 
@@ -460,7 +529,10 @@ const App: React.FC = () => {
       
       setIsLeaderManipulateModalOpen(false);
       
-      const prefix = isSupremeLeader ? "[最高领袖]" : "[境外干涉]";
+      let prefix = "[权势行动]";
+      if (manipulateType === 'SUPREME') prefix = "[最高领袖]";
+      else if (manipulateType === 'FOREIGN') prefix = "[境外干涉]";
+      
       const actionText = `${prefix} 动用权势：${leaderManipulateText}`;
 
       await handleChoice("action_manipulate_scales", actionText, 'SUCCESS', false, 0);
@@ -468,7 +540,13 @@ const App: React.FC = () => {
   };
 
   const handleConsumeRedStar = () => {
-    if (!gameState || gameState.stats.redStars <= 0) return;
+    if (!gameState) return;
+
+    if (appSettings.gameSettings.cheatMode) {
+        return; // Don't decrease stars in cheat mode
+    }
+
+    if (gameState.stats.redStars <= 0) return;
     setGameState(prev => {
         if (!prev) return null;
         return {
@@ -510,14 +588,85 @@ const App: React.FC = () => {
       );
     }
   };
+  
+  const handleLoadGame = async (file: File) => {
+    setGameState(null);
+    setIsLoading(true);
+    setIsError(false);
+    
+    try {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        
+        // Use AI to validate and repair the save file
+        const repairedState = await repairSaveData(json, appSettings.gameSettings.historyStyle);
+        
+        setGameState(repairedState);
+        
+        // Restore initial config if possible to allow 'Restart Current'
+        if (repairedState.name && repairedState.background && repairedState.stats?.attributes) {
+            setInitialConfig({
+                name: repairedState.name,
+                background: repairedState.background,
+                attributes: repairedState.stats.attributes,
+                backstory: repairedState.backstory || "已遗忘的过去",
+                traits: repairedState.stats.traits || [],
+                birthYear: repairedState.stats.birthYear || 1948
+            });
+        }
+
+        // Set narrative scene to something generic indicating load
+        setCurrentScene(`[系统记录] 存档已加载。\n当前时间：${repairedState.year}年${repairedState.month}月。\n革命形势：${repairedState.stats.currentFaction} | 身份：${repairedState.stats.isLeader ? "领袖" : "成员"}`);
+        
+        // Generate generic choices to resume play
+        setChoices([
+            { id: 'resume_1', text: '观察周围形势', intent: 'resume', difficulty: 30 },
+            { id: 'resume_2', text: '整理思绪，准备行动', intent: 'resume', difficulty: 30 },
+            { id: 'resume_3', text: '查阅近期报纸', intent: 'resume', difficulty: 30 }
+        ]);
+        
+    } catch (e) {
+        console.error("Load failed", e);
+        setIsError(true);
+        // Optionally show a specific error for load failure
+    } finally {
+        setIsLoading(false);
+    }
+  };
 
   const updateGameStateFromResponse = (
     response: any, 
     prevState: GameState, 
-    lastActionContext: { text: string; result: RollResult; date: { year: number; month: number }; earnedStar?: boolean; consumedRedStars?: number; consumedPowerPoints?: number } | null
+    lastActionContext: { text: string; result: RollResult; date: { year: number; month: number }; earnedStar?: boolean; consumedRedStars?: number; consumedPowerPoints?: number; choiceId?: string } | null
   ) => {
     setCurrentScene(response.narrative);
-    setChoices(response.choices);
+    
+    // Turns since last critical Logic
+    let newTurnsSinceCritical = prevState.turnsSinceLastCritical || 0;
+    
+    if (lastActionContext?.result === 'CRITICAL_SUCCESS') {
+        newTurnsSinceCritical = 0;
+    } else if (lastActionContext) {
+        // If last choice was the pity choice, reset too
+        if (lastActionContext.choiceId === 'pity_custom_action') {
+            newTurnsSinceCritical = 0;
+        } else {
+            newTurnsSinceCritical += 1;
+        }
+    }
+
+    // Inject Pity Choice if needed
+    let finalChoices = [...response.choices];
+    if (newTurnsSinceCritical >= 10 && !prevState.isGameOver) {
+        finalChoices.push({
+            id: 'pity_custom_action',
+            text: '【厚积薄发】你的长期隐忍迎来了转机...',
+            intent: 'Free custom action',
+            requiredAttribute: undefined,
+            difficulty: 0 // Explicitly 0
+        });
+    }
+    setChoices(finalChoices);
     
     const monthsPassed = (response.year - prevState.year) * 12 + (response.month - prevState.month);
 
@@ -588,6 +737,18 @@ const App: React.FC = () => {
         if (response.supremeLeaderUpdate.slogan) currentSlogan = response.supremeLeaderUpdate.slogan;
         if (response.supremeLeaderUpdate.symbol) currentSymbol = response.supremeLeaderUpdate.symbol;
     }
+    
+    // Designated Successor Update
+    let currentDesignatedSuccessor = prevState.designatedSuccessor;
+    if (response.designatedSuccessorUpdate) {
+        currentDesignatedSuccessor = response.designatedSuccessorUpdate;
+    }
+
+    // Suggested Heirs Update (Transient usually, but saved to state for UI)
+    let currentSuggestedHeirs = prevState.suggestedHeirs;
+    if (response.suggestedHeirs && Array.isArray(response.suggestedHeirs)) {
+        currentSuggestedHeirs = response.suggestedHeirs;
+    }
 
     // History and Deltas
     let newHistory = [...prevState.historySummary];
@@ -597,7 +758,17 @@ const App: React.FC = () => {
     if (lastActionContext?.consumedRedStars) redStarDelta -= lastActionContext.consumedRedStars;
 
     let powerPointDelta = 0;
-    if (response.statsDelta.powerPoints) powerPointDelta += response.statsDelta.powerPoints;
+    // Cap power point gain to +1 from response
+    const rawPowerDelta = response.statsDelta.powerPoints || 0;
+    const effectivePowerDelta = rawPowerDelta > 1 ? 1 : rawPowerDelta;
+    
+    // Update last grant date if power points were earned from the turn
+    let newLastGrantDate = prevState.lastPowerPointGrantDate;
+    if (effectivePowerDelta > 0) {
+        newLastGrantDate = { year: response.year, month: response.month };
+    }
+
+    if (effectivePowerDelta) powerPointDelta += effectivePowerDelta;
     if (lastActionContext?.consumedPowerPoints) powerPointDelta -= lastActionContext.consumedPowerPoints;
 
     if (lastActionContext) {
@@ -622,11 +793,17 @@ const App: React.FC = () => {
     }
 
     let newPowerPoints = prevState.stats.powerPoints;
-    if (response.statsDelta.powerPoints) {
-        newPowerPoints += response.statsDelta.powerPoints;
+    // Apply the capped power delta logic to state
+    if (effectivePowerDelta !== 0) {
+        newPowerPoints += effectivePowerDelta;
     }
     if (lastActionContext?.consumedPowerPoints) {
         newPowerPoints = Math.max(0, newPowerPoints - lastActionContext.consumedPowerPoints);
+    }
+    
+    // CHEAT MODE ENFORCEMENT
+    if (appSettings.gameSettings.cheatMode) {
+        newRedStars = 99;
     }
 
     const newStats: PlayerStats = {
@@ -642,6 +819,22 @@ const App: React.FC = () => {
       attributes: prevState.stats.attributes, 
       traits: currentTraits
     };
+    
+    // --- SYNCHRONIZE LEADER STATUS WITH FACTION LIST ---
+    // Check if player name appears in the current faction leader list
+    if (!newStats.isLeader && currentFactions) {
+        const playerFactionObj = currentFactions.find(f => f.name === newStats.currentFaction);
+        if (playerFactionObj && Array.isArray(playerFactionObj.leaders)) {
+            const isListedAsLeader = playerFactionObj.leaders.some(leaderName => 
+                // Loose match since names might vary slightly (e.g. "Comrade X" vs "X")
+                leaderName.includes(prevState.name)
+            );
+            if (isListedAsLeader) {
+                newStats.isLeader = true;
+            }
+        }
+    }
+    // ---------------------------------------------------
 
     let isGameOver = response.isGameOver;
     let gameOverReason = response.gameOverReason;
@@ -669,7 +862,11 @@ const App: React.FC = () => {
       isGameOver,
       gameOverReason,
       historySummary: newHistory,
-      potentialSuccessors: response.potentialSuccessors
+      potentialSuccessors: response.potentialSuccessors,
+      turnsSinceLastCritical: newTurnsSinceCritical,
+      designatedSuccessor: currentDesignatedSuccessor,
+      suggestedHeirs: currentSuggestedHeirs,
+      lastPowerPointGrantDate: newLastGrantDate
     });
   };
 
@@ -695,6 +892,7 @@ const App: React.FC = () => {
            themeColor={themeColor}
            slogan={gameState.supremeLeaderSlogan}
            symbol={gameState.rulingPartySymbol}
+           designatedSuccessor={gameState.designatedSuccessor}
         />
       )}
       
@@ -703,21 +901,23 @@ const App: React.FC = () => {
           <div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center animate-fade-in backdrop-blur-sm">
              <div className="bg-[#fdfbf7] p-6 rounded border-4 border-yellow-500 shadow-2xl text-center w-96 animate-scale-in max-w-[90%]">
                 <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-4xl text-yellow-400 drop-shadow-md">
-                    {isSupremeLeader ? "👑" : "🌍"}
+                    {manipulateType === 'SUPREME' ? "👑" : manipulateType === 'FOREIGN' ? "🌍" : "⚖️"}
                 </div>
                 <h3 className="text-2xl font-black text-yellow-800 mb-2 mt-4 tracking-widest">
-                    {isSupremeLeader ? "最高指示" : "境外干涉"}
+                    {manipulateType === 'SUPREME' ? "最高指示" : manipulateType === 'FOREIGN' ? "境外干涉" : "权势行动"}
                 </h3>
                 <p className="text-gray-700 mb-4 font-serif text-sm">
-                    {isSupremeLeader 
+                    {manipulateType === 'SUPREME' 
                       ? "作为最高领袖，你可以直接干预局势。" 
-                      : "作为外国领袖，你可以扶植代理人或渗透。"}
+                      : manipulateType === 'FOREIGN'
+                      ? "作为外国领袖，你可以扶植代理人或渗透。"
+                      : "动用你的政治资产，对当前局势进行干预。"}
                     <br/>描述你希望增强的派系和具体手段。
                 </p>
                 <textarea
                     value={leaderManipulateText}
                     onChange={(e) => setLeaderManipulateText(e.target.value)}
-                    placeholder={isSupremeLeader ? "例如：大力支持造反派，号召..." : "例如：提供经费给某个团体，扶植..."}
+                    placeholder={manipulateType === 'SUPREME' ? "例如：大力支持造反派，号召..." : "例如：提供经费给某个团体，扶植..."}
                     className="w-full h-24 p-2 mb-4 bg-[#f4f1de] border border-gray-400 focus:border-red-800 outline-none text-sm resize-none"
                     autoFocus
                 />
@@ -734,7 +934,7 @@ const App: React.FC = () => {
            <div className="flex flex-col items-center animate-fade-in">
               <div className="w-16 h-16 border-4 border-red-800 border-t-transparent rounded-full animate-spin mb-6"></div>
               <h2 className="text-2xl font-black text-red-900 mb-2 font-serif tracking-widest">历史演进中...</h2>
-              <p className="text-gray-600 font-serif">正在生成1966年的世界...</p>
+              <p className="text-gray-600 font-serif">正在读取历史档案，请稍候...</p>
            </div>
         </div>
       )}
@@ -761,6 +961,7 @@ const App: React.FC = () => {
             isLoading={isLoading} 
             onOpenSettings={() => setIsSettingsOpen(true)}
             gameSettings={appSettings.gameSettings}
+            onLoadSave={handleLoadGame}
         />
       )}
 
@@ -779,6 +980,7 @@ const App: React.FC = () => {
           isSupremeLeader={isSupremeLeader}
           themeColor={themeColor}
           onInheritWorld={handleInheritGame}
+          onLoadSave={handleLoadGame}
         />
       )}
 

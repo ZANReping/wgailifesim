@@ -4,7 +4,8 @@ export enum BackgroundType {
   BLACK_FIVE = '黑五类', // Landlords, Rich peasants, Counter-revolutionaries
   INTELLECTUAL = '知识分子', // Teachers, Experts (often precarious)
   ORDINARY = '普通市民',
-  HISTORICAL = '历史人物' // Real historical figures
+  HISTORICAL = '历史人物', // Real historical figures
+  TIME_TRAVELER = '穿越者' // Time travelers (Real or Fictional)
 }
 
 export enum TraitRarity {
@@ -12,17 +13,19 @@ export enum TraitRarity {
   RARE = '稀有',
   EPIC = '罕见',
   LEGENDARY = '独特',
+  CRIME = '罪名', // New Category
   NEGATIVE = '恶劣',
   HIDDEN = '隐秘'
 }
 
 export const TRAIT_SORT_ORDER: Record<TraitRarity, number> = {
   [TraitRarity.LEGENDARY]: 0,
-  [TraitRarity.NEGATIVE]: 1,
-  [TraitRarity.EPIC]: 2,
-  [TraitRarity.RARE]: 3,
-  [TraitRarity.COMMON]: 4,
-  [TraitRarity.HIDDEN]: 5
+  [TraitRarity.CRIME]: 1,
+  [TraitRarity.NEGATIVE]: 2, // Modified order per request
+  [TraitRarity.EPIC]: 3,
+  [TraitRarity.RARE]: 4,
+  [TraitRarity.COMMON]: 5,
+  [TraitRarity.HIDDEN]: 6
 };
 
 export enum HistoryStyle {
@@ -41,6 +44,8 @@ export interface GameSettings {
   monthsPerTurn: number; // 1-6, default 1
   baseLuck: number; // 0.5 - 2.0, default 1.0
   historyStyle: HistoryStyle; // Default REALISM
+  cheatMode?: boolean; // ZAN mode: 99 Red Stars lock
+  cheatCodeInput?: string; // The text entered by user for cheat mode
 }
 
 export interface AppSettings {
@@ -135,6 +140,10 @@ export interface GameState {
   gameOverReason?: string;
   backstory: string; // Keep track of the user's initial backstory
   potentialSuccessors?: PotentialSuccessor[]; // Only present if game over and player was leader
+  turnsSinceLastCritical: number; // Track turns without critical success for pity system
+  designatedSuccessor?: string | null; // Name of the designated heir from testament
+  suggestedHeirs?: string[]; // List of 3 suggested heirs for testament choice
+  lastPowerPointGrantDate?: { year: number; month: number }; // Track when the last power point was granted
 }
 
 export interface Choice {
@@ -179,4 +188,6 @@ export interface GameSceneResponse {
     isLeader: boolean;
   };
   potentialSuccessors?: PotentialSuccessor[];
+  designatedSuccessorUpdate?: string; // If player wrote a testament, return the name here
+  suggestedHeirs?: string[]; // If choice is write testament, return 3 suggestions
 }
