@@ -121,26 +121,38 @@ const App: React.FC = () => {
   // Load settings on mount
   useEffect(() => {
     const saved = localStorage.getItem('gemini_rpg_settings');
+    let loadedSettings = DEFAULT_SETTINGS;
+
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // ... (Migration logic same as before) ...
-        let settings: AppSettings = {
+        loadedSettings = {
              apiType: parsed.apiType || 'gemini',
              gemini: { ...DEFAULT_PROVIDER_CONFIG, ...parsed.gemini },
              openai: { ...DEFAULT_PROVIDER_CONFIG, ...parsed.openai },
              gameSettings: { ...DEFAULT_GAME_SETTINGS, ...parsed.gameSettings }
         };
         // Ensure default historyStyle if missing from saved settings
-        if (!settings.gameSettings.historyStyle) {
-            settings.gameSettings.historyStyle = HistoryStyle.REALISM;
+        if (!loadedSettings.gameSettings.historyStyle) {
+            loadedSettings.gameSettings.historyStyle = HistoryStyle.REALISM;
         }
-        setAppSettings(settings);
-        const active = settings.apiType === 'openai' ? settings.openai : settings.gemini;
-        updateGeminiConfig(active.apiKey, active.baseUrl, active.modelName, settings.apiType);
+        setAppSettings(loadedSettings);
+        const active = loadedSettings.apiType === 'openai' ? loadedSettings.openai : loadedSettings.gemini;
+        updateGeminiConfig(active.apiKey, active.baseUrl, active.modelName, loadedSettings.apiType);
       } catch (e) {
         console.error("Failed to load settings", e);
       }
+    }
+
+    // Check if we have a valid key (either from Env or LocalStorage)
+    const activeConfig = loadedSettings.apiType === 'openai' ? loadedSettings.openai : loadedSettings.gemini;
+    const hasEnvKey = !!process.env.API_KEY || !!process.env.GEMINI_API_KEY;
+    const hasSavedKey = !!activeConfig.apiKey;
+
+    // If deployed on static host (no env) and no saved key, prompt user
+    if (!hasEnvKey && !hasSavedKey) {
+        // Small delay to ensure UI renders first
+        setTimeout(() => setIsSettingsOpen(true), 500);
     }
   }, []);
 
